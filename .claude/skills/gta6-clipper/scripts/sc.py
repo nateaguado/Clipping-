@@ -8,6 +8,10 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+# ffmpeg only reads http_proxy (even for https links); behind an HTTPS proxy it would otherwise fail to reach anything
+if os.environ.get('HTTPS_PROXY') and not os.environ.get('http_proxy'):
+    os.environ['http_proxy'] = os.environ['HTTPS_PROXY']
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.dirname(HERE)
 TOOLS = os.path.join(os.path.expanduser('~'), '.stream-clipper')

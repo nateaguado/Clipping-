@@ -151,6 +151,8 @@ class Chat(threading.Thread):
                 self.stop.wait(5)
 
     def twitch(self):
+        if os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy'):
+            return self.twitch_ws()  # behind a web proxy (cloud sessions) a plain chat connection cannot get out
         s = socket.create_connection(('irc.chat.twitch.tv', 6667), timeout=30)
         s.sendall(b'NICK justinfan%d\r\n' % (int(time.time()) % 100000))  # Twitch's read-only anonymous login
         s.sendall(f'JOIN #{self.name}\r\n'.encode())
@@ -170,6 +172,23 @@ class Chat(threading.Thread):
                 line = ln.decode('utf-8', 'replace')
                 if line.startswith('PING'):
                     s.sendall(('PONG' + line[4:] + '\r\n').encode())
+                elif ' PRIVMSG ' in line:
+                    self.msgs.append((time.time(), line.split(' :', 1)[-1] if ' :' in line else ''))
+
+    def twitch_ws(self):
+        """The same anonymous read-only chat, over Twitch's web chat connection (goes through HTTPS proxies)."""
+        from curl_cffi.requests import Session
+        ws = Session(impersonate='chrome').ws_connect('wss://irc-ws.chat.twitch.tv:443')
+        ws.send_str('NICK justinfan%d' % (int(time.time()) % 100000))  # text frames: Twitch hangs up on binary ones
+        ws.send_str(f'JOIN #{self.name}')
+        self.connected = True
+        while not self.stop.is_set():
+            raw, _ = ws.recv()
+            if not raw:
+                continue
+            for line in raw.decode('utf-8', 'replace').split('\r\n'):
+                if line.startswith('PING'):
+                    ws.send_str('PONG' + line[4:])
                 elif ' PRIVMSG ' in line:
                     self.msgs.append((time.time(), line.split(' :', 1)[-1] if ' :' in line else ''))
 
