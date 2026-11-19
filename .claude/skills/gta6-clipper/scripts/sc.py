@@ -172,8 +172,14 @@ def _whisper(wav):
                 for seg in d['segments'] for w in seg.get('words', []) if w['word'].strip()]
     from faster_whisper import WhisperModel
     m = WhisperModel('large-v3-turbo', compute_type='int8')
-    segs, _ = m.transcribe(wav, word_timestamps=True)
-    return [dict(w=w.word.strip(), s=round(float(w.start), 3), e=round(float(w.end), 3)) for s in segs for w in s.words if w.word.strip()]
+
+    def run(**kw):
+        segs, _ = m.transcribe(wav, word_timestamps=True, **kw)
+        return [dict(w=w.word.strip(), s=round(float(w.start), 3), e=round(float(w.end), 3)) for s in segs for w in s.words if w.word.strip()]
+    try:
+        return run()
+    except IndexError:  # faster-whisper's word timing crashes on a segment with no alignable speech (screams, explosions)
+        return run(vad_filter=True)
 
 
 def jdump(obj, path):
