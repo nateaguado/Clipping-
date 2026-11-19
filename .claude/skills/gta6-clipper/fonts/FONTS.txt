@@ -1,0 +1,6 @@
+Fonts in this folder come from Google Fonts (fonts.google.com), downloaded as Latin subsets.
+Each is free to use and to share under its own open licence:
+SIL Open Font License 1.1 (most families), Apache License 2.0 (Roboto, Roboto Condensed, Open Sans older releases),
+or the Ubuntu Font Licence (Ubuntu). TikTok Sans is under the SIL Open Font License 1.1.
+Full licence texts: https://openfontlicense.org , https://www.apache.org/licenses/LICENSE-2.0 , https://ubuntu.com/legal/font-licence
+The fonts may be used in videos, including paid and client work. They may not be sold on their own.
