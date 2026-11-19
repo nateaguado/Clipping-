@@ -84,8 +84,9 @@ class Recorder(threading.Thread):
                 continue
             self.ok = True
             pat = os.path.join(self.folder, 'seg_%s.ts')  # the piece's start time (unix seconds) is in its name
-            # clock timestamps: Twitch's ad breaks and stream restarts break the stream's own timestamps (pieces stop splitting)
-            self.proc = subprocess.Popen([sc.FF(), '-v', 'error', '-y', '-use_wallclock_as_timestamps', '1', '-fflags', '+genpts', '-i', url, '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy',
+            # the stream's own timestamps: arrival-time stamps (-use_wallclock_as_timestamps) bunch frames into bursts,
+            # because HLS arrives a few seconds at a time, so the clips lag and drift out of sync with the sound
+            self.proc = subprocess.Popen([sc.FF(), '-v', 'error', '-y', '-fflags', '+genpts', '-i', url, '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy',
                                           '-f', 'segment', '-segment_time', str(SEG), '-reset_timestamps', '1', '-strftime', '1', pat],
                                          stdin=subprocess.DEVNULL)
             while self.proc.poll() is None and not self.stop.is_set():
