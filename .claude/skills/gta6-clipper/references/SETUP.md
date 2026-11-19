@@ -16,3 +16,14 @@
 
 To uninstall: delete `~/.stream-clipper` (the tools) and, if the user wants, `~/Stream Clips` (their clips), then the
 skill folder in `~/.claude/skills/gta6-clipper`. Ask first; use the Trash.
+
+## Running in a Claude Code cloud session
+
+- The cloud environment needs network access to Twitch's video servers (`*.ttvnw.net`, plus several
+  `*.cloudfront.net` hosts) and Hugging Face's model servers. A wildcard can't be added with an approval card,
+  so either add `*.ttvnw.net` under the environment's Allowed domains in Settings or set network access to
+  unrestricted.
+- Live mode reads Twitch chat over its web chat connection when a proxy is set, and `sc.py` points ffmpeg at the
+  proxy. Without those changes it can't reach chat or video.
+- An anonymous viewer gets Twitch ad breaks. Check each live moment's contact sheet and skip any that are just
+  "Commercial break in progress".
