@@ -225,6 +225,20 @@ class Chat(threading.Thread):
 
 # ---------------------------------------------------------------- spotting moments
 
+def ad_share(path):
+    """Share of a moment showing Twitch's ad screen (a smooth colour blur with one line of text). Measured: the ad
+    screen scores about 5.5 fine detail per frame, gameplay with a facecam 8 or more."""
+    import numpy as np
+    w, h = 160, 90
+    raw = subprocess.run([sc.FF(), '-v', 'error', '-i', path, '-vf', f'fps=1,scale={w}:{h},format=gray', '-f', 'rawvideo', '-'],
+                         capture_output=True).stdout
+    if len(raw) < w * h:
+        return 0.0
+    f = np.frombuffer(raw[:len(raw) // (w * h) * w * h], np.uint8).reshape(-1, h, w).astype(np.float32)
+    detail = np.abs(np.diff(f, axis=2)).mean(axis=(1, 2)) + np.abs(np.diff(f, axis=1)).mean(axis=(1, 2))
+    return float((detail < 7).mean())
+
+
 def heat(texts):
     """Messages plus extra weight for reaction words: a burst of 'LMAOOO 💀' counts more than normal talk."""
     return len(texts) + 1.5 * sum(1 for x in texts if REACT.search(x or ''))
@@ -296,6 +310,14 @@ def main():
                 tmp = os.path.join(base, f'_moment_{stamp}.mp4')
                 if not rec.cut(t_spike - a.pre, t_spike + a.post, tmp):
                     say('Could not cut that moment (the recording had a gap). Skipped.')
+                    continue
+                share = ad_share(tmp)
+                if share >= 0.7:  # the viewer was shown Twitch's ad screen: nothing to clip, don't spend a slot on it
+                    os.remove(tmp)
+                    with open(log, 'a') as fh:
+                        fh.write(f"- **{time.strftime('%H:%M:%S', time.localtime(t_spike))}** · {ratio:.1f}x normal chat · "
+                                 f"skipped: Twitch ad break ({share:.0%} of the moment)\n")
+                    say(f'Chat spike at {stamp} landed on an ad break ({share:.0%}). Skipped.')
                     continue
                 clip_name = f'{name} live {stamp}'
                 r = subprocess.run([sc.VPY(), os.path.join(HERE, 'clip.py'), 'new', clip_name, '--src', tmp, '--streamer', name],
