@@ -277,6 +277,11 @@ def main():
                      '(already downloaded and transcribed). Finish the best ones with a hook and a render.\n\n')
     say(f'Live mode on {plat}: {name}. Recording the last {a.keep} minutes and reading chat. Moments go to {log}')
     rec, chat = Recorder(plat, name, buf, a.keep), Chat(plat, name)
+    # stopping the watcher (kill, a stopped background task) must also stop its ffmpeg recorder: an orphaned one
+    # keeps writing into the same buffer, and a restarted watcher's moments then have every few seconds twice
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGHUP, lambda *_: sys.exit(0))
     rec.start(); chat.start()
     hist = collections.deque(maxlen=36)  # the last 6 minutes of 10-second chat heat
     last_hit, saved, t_end = 0.0, 0, time.time() + a.hours * 3600
