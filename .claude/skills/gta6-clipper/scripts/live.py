@@ -225,6 +225,18 @@ class Chat(threading.Thread):
 
 # ---------------------------------------------------------------- spotting moments
 
+def current_game(plat, name):
+    """The game the stream is showing right now (Twitch), '' for none, None when it cannot be checked."""
+    if plat != 'twitch':
+        return None
+    try:
+        d = find.gql('{ user(login: "%s") { stream { game { name } } } }' % name) or {}
+        s = ((d.get('data') or d).get('user') or {}).get('stream')
+        return ((s or {}).get('game') or {}).get('name', '') if s else ''
+    except Exception:
+        return None
+
+
 def ad_share(path):
     """Share of a moment showing Twitch's ad screen (a smooth colour blur with one line of text). Measured: the ad
     screen scores about 5.5 fine detail per frame, gameplay with a facecam 8 or more."""
@@ -263,6 +275,8 @@ def main():
     w.add_argument('--max', type=int, default=30, help='stop saving moments after this many (default 30)')
     w.add_argument('--pre', type=int, default=35, help='seconds before the chat spike (default 35)')
     w.add_argument('--post', type=int, default=10, help='seconds after the chat spike (default 10)')
+    w.add_argument('--game', default='Grand Theft Auto', help='only save moments while the stream shows a game whose '
+                   'name contains this (Twitch only; default "Grand Theft Auto"; "" for any)')
     a = ap.parse_args()
 
     plat, name = resolve(a.channel)
@@ -315,6 +329,14 @@ def main():
                 tmp = os.path.join(base, f'_moment_{stamp}.mp4')
                 if not rec.cut(t_spike - a.pre, t_spike + a.post, tmp):
                     say('Could not cut that moment (the recording had a gap). Skipped.')
+                    continue
+                game = current_game(plat, name) if a.game else None
+                if game is not None and a.game.lower() not in game.lower():
+                    os.remove(tmp)
+                    with open(log, 'a') as fh:
+                        fh.write(f"- **{time.strftime('%H:%M:%S', time.localtime(t_spike))}** · {ratio:.1f}x normal chat · "
+                                 f"skipped: not {a.game} (stream is on {game or 'no game'})\n")
+                    say(f'Chat spike at {stamp} skipped: the stream is on {game or "no game"}, not {a.game}.')
                     continue
                 share = ad_share(tmp)
                 if share >= 0.7:  # the viewer was shown Twitch's ad screen: nothing to clip, don't spend a slot on it
