@@ -631,6 +631,72 @@ def sticker_pic(src, at, width, box=None, tilt=0):
     return card
 
 
+def cam_layout(cam, face, ow, oh):
+    """The part of the facecam to show in an ow x oh panel, and where the streamer's head lands in it.
+    When the facecam has to be trimmed to fit the panel, the trim is placed around the face, not the middle,
+    so the head is never cut off. Returns ((x, y, w, h) in the source, head box (x0, y0, x1, y1) in the panel or None)."""
+    cx, cy, cw, ch = cam
+    ar = ow / oh
+    hb = None
+    if face:
+        fx_, fy_, fw_, fh_ = face
+        if cx <= fx_ + fw_ / 2 <= cx + cw and cy <= fy_ + fh_ / 2 <= cy + ch:  # the face found is the one in the facecam
+            hb = (fx_ - fw_ * .45, fy_ - fh_ * .75, fx_ + fw_ * 1.45, fy_ + fh_ * 1.45)  # the whole head, hair and chin
+    if cw / ch > ar:
+        vw, vh = ch * ar, ch
+        mid = (hb[0] + hb[2]) / 2 if hb else cx + cw / 2
+        vx, vy = min(max(cx, mid - vw / 2), cx + cw - vw), cy
+    else:
+        vw, vh = cw, cw / ar
+        mid = (hb[1] + hb[3]) / 2 if hb else cy + ch / 2
+        vy, vx = min(max(cy, mid - vh / 2), cy + ch - vh), cx
+    head = None
+    if hb:
+        k = ow / vw
+        head = ((hb[0] - vx) * k, (hb[1] - vy) * k, (hb[2] - vx) * k, (hb[3] - vy) * k)
+    return (vx, vy, vw, vh), head
+
+
+def cam_face(d, cam, lay):
+    """The streamer's face inside the facecam box (source pixels), found once and kept in layout.json as cam_face."""
+    if lay.get('cam_face_for') == list(cam):
+        return lay.get('cam_face')
+    x, y, w, h = [int(v) for v in cam]
+    boxes = []
+    cap = cv2.VideoCapture(os.path.join(d, 'source.mp4'))
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    k = 3.0  # facecams are small: look at them bigger
+    det = sc.face_detector(int(w * k), int(h * k), .6)
+    for i in range(1, 8):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * i / 8))
+        ok, img = cap.read()
+        if not ok:
+            continue
+        sub = cv2.resize(img[y:y + h, x:x + w], (int(w * k), int(h * k)))
+        _, faces = det.detect(sub)
+        if faces is not None and len(faces):
+            f = max(faces, key=lambda r: r[2] * r[3])
+            boxes.append((x + f[0] / k, y + f[1] / k, f[2] / k, f[3] / k))
+    cap.release()
+    face = [float(np.median([b[j] for b in boxes])) for j in range(4)] if boxes else lay.get('face')
+    lay['cam_face'], lay['cam_face_for'] = face, list(cam)
+    sc.jdump(lay, os.path.join(d, 'layout.json'))
+    return face
+
+
+def zoom_limit(head, w, h, margin=10):
+    """The biggest zoom about the head's centre that keeps the whole head in a w x h panel."""
+    x0, y0, x1, y1 = head
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    lim = []
+    for c, a, b, size in ((cx, x0, x1, w), (cy, y0, y1, h)):
+        if c - a > 0:
+            lim.append((c - margin) / (c - a))
+        if b - c > 0:
+            lim.append((size - margin - c) / (b - c))
+    return max(1.0, min(lim)) if lim else 1.0
+
+
 def blur_bg(img):
     bg = crop_to(img, 0, 0, img.shape[1], img.shape[0], 216, 384)
     bg = cv2.GaussianBlur(bg, (0, 0), 9)
@@ -756,10 +822,18 @@ def _render(a, d, still, B, full_h):
 
     # geometry of each layout
     cam_h = int(H * float(p.get('cam_share', .42)))
+    if kind == 'stack' and B and not p.get('cam_share'):
+        # in the brand frame the footage area is short: give the facecam its own shape so nothing is trimmed off it
+        cam_h = int(min(max(W * cam[3] / cam[2], H * .36), H * .55))
+    cam_view, head, zmax = None, None, 99.0
+    if kind == 'stack':
+        cam_view, head = cam_layout(cam, cam_face(d, cam, lay), W, cam_h)
+        if head:
+            zmax = zoom_limit(head, W, cam_h)
     gz = float(p.get('game_zoom', 1.0))
     gx = float(p.get('game_x', .5))
     if kind == 'stack':
-        cap_y = int(p.get('caption_y') or cam_h)  # on the seam between facecam and gameplay
+        cap_y = int(p.get('caption_y') or (cam_h + 92 if B else cam_h))  # on the seam (brand frame: just under it, clear of the chin)
     elif kind == 'game':
         cap_y = int(p.get('caption_y') or (H * .69 if B else 1330))
     else:
@@ -845,7 +919,7 @@ def _render(a, d, still, B, full_h):
         if kind == 'stack':
             frame = np.zeros((H, W, 3), np.uint8)
             x, y, w_, h_ = cam
-            frame[:cam_h] = crop_to(img, x, y, w_, h_, W, cam_h)
+            frame[:cam_h] = crop_to(img, *cam_view, W, cam_h)
             gh = H - cam_h
             vw = sh * W / gh / gz
             vh = sh / gz
@@ -866,7 +940,11 @@ def _render(a, d, still, B, full_h):
             z_, dx_, dy_ = FX.punch_at(punches, t)
             if z_ > 1.001 or dx_ or dy_:
                 region = frame[:cam_h] if kind == 'stack' else frame
-                FX.apply_zoom(region, z_, dx_, dy_, cy=.45 if kind == 'stack' else .38)
+                if kind == 'stack' and head:  # zoom on the face, never so far that the head leaves the panel
+                    hx_, hy_ = (head[0] + head[2]) / 2 / W, (head[1] + head[3]) / 2 / cam_h
+                    FX.apply_zoom(region, min(z_, zmax), dx_ if z_ <= zmax else 0, dy_ if z_ <= zmax else 0, cy=hy_, cx=hx_)
+                else:
+                    FX.apply_zoom(region, z_, dx_, dy_, cy=.45 if kind == 'stack' else .38)
             for pu in punches:
                 if pu.get('flash') and pu['s'] <= t < pu['s'] + .15:
                     FX.flash(frame, int((t - pu['s']) * FPS))
@@ -904,7 +982,7 @@ def _render(a, d, still, B, full_h):
                     ex, ey = min(W - pic.width / 2 - 40, W / 2 + cw_now / 2 - pic.width * .3), y_ or (cap_y - 125)
                 paste(frame, pic, ex, ey, (.5, .8, 1.12, 1.04)[k] if k < 4 else 1.0)
         if BF:
-            frame = BF.compose(frame, paste)
+            frame = BF.compose(frame, paste, head if kind == 'stack' else None, cam_h if kind == 'stack' else None)
         if still is not None:
             sc.imwrite(out, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
             print(out)

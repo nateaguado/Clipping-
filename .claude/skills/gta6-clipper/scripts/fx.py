@@ -349,13 +349,13 @@ def punch_at(punches, t):
     return z, dx, dy
 
 
-def apply_zoom(region, z, dx=0.0, dy=0.0, cy=.42):
-    """Zoom a picture region (in place) around its centre-ish point, with a shake offset in px."""
+def apply_zoom(region, z, dx=0.0, dy=0.0, cy=.42, cx=.5):
+    """Zoom a picture region (in place) around a point (cx, cy as shares of its width/height), with a shake offset in px."""
     import cv2
     if z <= 1.001 and not dx and not dy:
         return region
     h, w = region.shape[:2]
-    cx_, cy_ = w / 2, h * cy
+    cx_, cy_ = w * cx, h * cy
     M = np.float32([[z, 0, cx_ - z * cx_ + dx], [0, z, cy_ - z * cy_ + dy]])
     region[:] = cv2.warpAffine(region, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     return region

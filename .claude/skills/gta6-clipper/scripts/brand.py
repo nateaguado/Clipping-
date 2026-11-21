@@ -194,9 +194,16 @@ class Frame:
         self.bottom = footer(b, W)
         self.mark = watermark(b)
 
-    def compose(self, content, paste):
+    def compose(self, content, paste, head=None, seam=None):
         if self.mark is not None:
-            paste(content, self.mark, self.W - 34 - self.mark.width / 2, 34 + self.mark.height / 2)
+            mw, mh = self.mark.width, self.mark.height
+            ch = content.shape[0]
+            # top right of the footage; if that covers the streamer's head, top left; if that does too, the bottom
+            # right of the gameplay (clear of the captions, which sit just under the facecam)
+            spots = [(self.W - 34 - mw, 34), (34, 34)] if head and seam else [(self.W - 34 - mw, 34)]
+            x0, y0 = next(((x, y) for x, y in spots if not head or head[2] < x or head[0] > x + mw or head[3] < y or head[1] > y + mh),
+                          (self.W - 34 - mw, ch - 40 - mh))
+            paste(content, self.mark, x0 + mw / 2, y0 + mh / 2)
         out = np.empty((self.H, self.W, 3), np.uint8)
         out[:self.hh] = self.top
         out[self.hh:self.hh + self.content_h] = content
