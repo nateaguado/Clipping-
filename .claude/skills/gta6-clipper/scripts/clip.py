@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import sc
 import fx as FX
+import brand as BRAND
 
 W, H, FPS = sc.W, sc.H, sc.FPS
 FONTS = os.path.join(sc.SKILL, 'fonts')
@@ -640,7 +641,21 @@ def blur_bg(img):
 # ---------------------------------------------------------------- render
 
 def cmd_render(a, d=None, still=None):
+    """Renders the clip. With a brand frame (channels/brand.json) the footage is laid out in the space between the
+    page's title bar and footer, then framed."""
+    global H
     d = d or clip_dir(a.name)
+    B = BRAND.load() if load(d).get('brand', True) else None
+    full_h = H
+    if B:
+        H = full_h - int(B['header_h']) - int(B['footer_h'])
+    try:
+        return _render(a, d, still, B, full_h)
+    finally:
+        H = full_h
+
+
+def _render(a, d, still, B, full_h):
     p = load(d)
     if not os.path.exists(os.path.join(d, 'words.json')):
         cmd_prep(a, d)
@@ -679,6 +694,8 @@ def cmd_render(a, d=None, still=None):
     if kind == 'stack' and not cam:
         kind = 'full'
     look = load_look(p.get('captions') or 'comic') if p.get('captions') != 'none' else None
+    if look and B:
+        look = dict(B['captions'])
     if look and isinstance(p.get('caption_style'), dict):
         look.update(p['caption_style'])
     loud = FX.word_loudness(cut, owords)
@@ -700,7 +717,7 @@ def cmd_render(a, d=None, still=None):
         s_ = t_of(tg.get('at', 0))
         e_ = t_of(tg['until']) if tg.get('until') is not None else s_ + float(tg.get('for', 1.0))
         txt = tg['text'] if tg['text'].startswith('*') else f"*{tg['text'].strip('*')}*"
-        tags.append(dict(s=s_, e=min(e_, total), first=s_, loud=.5, toks=[(txt.upper() if look and look.get('case') == 'upper' else txt, tg.get('color', 'yellow'))]))
+        tags.append(dict(s=s_, e=min(e_, total), first=s_, loud=.5, toks=[(txt.upper() if look and look.get('case') == 'upper' else txt, tg.get('color', B['tag_color'] if B else 'yellow'))]))
     if tags:
         track = [c for c in track if not any(tg['s'] - .05 <= c['s'] < tg['e'] for tg in tags)] + tags
         track.sort(key=lambda c: c['s'])
@@ -744,9 +761,9 @@ def cmd_render(a, d=None, still=None):
     if kind == 'stack':
         cap_y = int(p.get('caption_y') or cam_h)  # on the seam between facecam and gameplay
     elif kind == 'game':
-        cap_y = int(p.get('caption_y') or 1330)
+        cap_y = int(p.get('caption_y') or (H * .69 if B else 1330))
     else:
-        cap_y = int(p.get('caption_y') or 1250)
+        cap_y = int(p.get('caption_y') or (H * .65 if B else 1250))
     fx = fy = None
     if kind == 'full':
         fj = os.path.join(d, '_track.json')
@@ -762,7 +779,8 @@ def cmd_render(a, d=None, still=None):
 
     hook = p.get('hook') or {}
     hook_img = hook_pic(hook['text'], size=int(hook.get('size', 56)), style=hook.get('style', 'white'),
-                        maxw=980 if hook.get('style') == 'plate' else 880) if hook.get('text') else None
+                        maxw=980 if hook.get('style') == 'plate' else 880) if hook.get('text') and not B else None
+    BF = BRAND.Frame(B, W, full_h, p, hook.get('text')) if B else None
     hook_until = total if str(hook.get('until', 'end')) == 'end' else t_of(hook.get('until'))
     hook_y = int(hook.get('y') or (290 if kind != 'stack' else 250))
     if hook_img is not None and kind == 'stack' and not hook.get('y'):
@@ -805,14 +823,14 @@ def cmd_render(a, d=None, still=None):
         y_ = int(nt.get('y') or (cam_h + 140 if kind == 'stack' else 520))
         notes.append((s_, e_, y_, img_))
     credit = p.get('credit')
-    credit_img = credit_pic(credit) if credit else None
+    credit_img = credit_pic(credit) if credit and not B else None  # with a brand frame the name is in the title bar
 
     frames = [int(round(still * FPS))] if still is not None else range(n)
     out = os.path.join(sc.conf()['work'], 'finished', f"{p['name']}.mp4") if still is None else os.path.join(d, f'still_{still:.2f}.jpg')
     vid = os.path.join(d, '_video.mp4')
     enc = None
     if still is None:
-        enc = subprocess.Popen([sc.FF(), '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(FPS), '-i', '-',
+        enc = subprocess.Popen([sc.FF(), '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{full_h}', '-r', str(FPS), '-i', '-',
                                 '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p', vid], stdin=subprocess.PIPE)
     src = cv2.VideoCapture(cut)
     for i in frames:
@@ -885,6 +903,8 @@ def cmd_render(a, d=None, still=None):
                 if ex > W - pic.width / 2 - 30:  # no room beside it: sit on the caption's top right corner
                     ex, ey = min(W - pic.width / 2 - 40, W / 2 + cw_now / 2 - pic.width * .3), y_ or (cap_y - 125)
                 paste(frame, pic, ex, ey, (.5, .8, 1.12, 1.04)[k] if k < 4 else 1.0)
+        if BF:
+            frame = BF.compose(frame, paste)
         if still is not None:
             sc.imwrite(out, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
             print(out)
