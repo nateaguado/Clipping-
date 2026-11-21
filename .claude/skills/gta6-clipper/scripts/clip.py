@@ -833,7 +833,7 @@ def _render(a, d, still, B, full_h):
     gz = float(p.get('game_zoom', 1.0))
     gx = float(p.get('game_x', .5))
     if kind == 'stack':
-        cap_y = int(p.get('caption_y') or (cam_h + 92 if B else cam_h))  # on the seam (brand frame: just under it, clear of the chin)
+        cap_y = int(p.get('caption_y') or cam_h)  # on the seam between facecam and gameplay (moved down below if it would cover the face)
     elif kind == 'game':
         cap_y = int(p.get('caption_y') or (H * .69 if B else 1330))
     else:
@@ -851,6 +851,11 @@ def _render(a, d, still, B, full_h):
         crop_w = full_w / max(1.0, zoom)
         crop_h = crop_w * H / W
 
+    if kind == 'stack' and head and pics and not p.get('caption_y'):
+        # captions may sit over the chin, never over the mouth, nose or eyes: if the seam is too close to the face, go lower
+        ch_ = pics.caption([('HEY', None)]).height * 1.12  # the pop animation makes captions a little bigger for a moment
+        mouth = head[1] + (head[3] - head[1]) * 1.6 / 2.2
+        cap_y = int(max(cap_y, mouth + ch_ / 2 + 6))
     hook = p.get('hook') or {}
     hook_img = hook_pic(hook['text'], size=int(hook.get('size', 56)), style=hook.get('style', 'white'),
                         maxw=980 if hook.get('style') == 'plate' else 880) if hook.get('text') and not B else None
